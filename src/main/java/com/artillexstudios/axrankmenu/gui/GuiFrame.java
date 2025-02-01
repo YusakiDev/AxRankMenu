@@ -2,13 +2,17 @@ package com.artillexstudios.axrankmenu.gui;
 
 import com.artillexstudios.axapi.config.Config;
 import com.artillexstudios.axapi.libs.boostedyaml.boostedyaml.block.implementation.Section;
+import com.artillexstudios.axapi.scheduler.Scheduler;
 import com.artillexstudios.axapi.utils.NumberUtils;
 import com.artillexstudios.axapi.utils.StringUtils;
+import com.artillexstudios.axrankmenu.hooks.currency.CurrencyHook;
+import com.artillexstudios.axrankmenu.hooks.HookManager;
 import com.artillexstudios.axrankmenu.utils.ItemBuilderUtil;
 import dev.triumphteam.gui.components.GuiAction;
 import dev.triumphteam.gui.guis.BaseGui;
 import dev.triumphteam.gui.guis.GuiItem;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
@@ -21,6 +25,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+
+import static com.artillexstudios.axrankmenu.AxRankMenu.MESSAGEUTILS;
 
 public class GuiFrame {
     protected final Config file;
@@ -97,6 +103,54 @@ public class GuiFrame {
     }
 
     protected void createItem(@NotNull String route, @Nullable GuiAction<InventoryClickEvent> action, Map<String, String> replacements, IntArrayList slots) {
+        var buyActions = file.getStringList(route + ".buy-actions");
+        if (!buyActions.isEmpty()) {
+            action = event -> {
+                Player player = (Player) event.getWhoClicked();
+                double price = file.getDouble(route + ".price", -1.0D);
+                String currency = file.getString(route + ".currency", "Vault");
+
+                // Handle price check only if price is set
+                if (price != -1) {
+                    final CurrencyHook hook = HookManager.getCurrencyHook(currency);
+                    if (hook == null) return;
+
+                    if (hook.getBalance(player) < price) {
+                        MESSAGEUTILS.sendLang(player, "buy.no-currency");
+                        return;
+                    }
+
+                    hook.takeBalance(player, price);
+                }
+
+                // Execute buy actions regardless of price
+                for (String buyAction : buyActions) {
+                    final String[] type = buyAction.split(" ");
+                    String ac = buyAction.replace(type[0] + " ", "");
+                    ac = ac.replace("%player%", player.getName());
+                    ac = ac.replace("%name%", file.getString(route + ".item.name", ""));
+                    ac = ac.replace("%price%", file.getString(route + ".price", "---"));
+                    ac = ac.replace("%server%", file.getString(route + ".server", ""));
+
+                    switch (type[0]) {
+                        case "[MESSAGE]": {
+                            player.sendMessage(StringUtils.formatToString(ac));
+                            break;
+                        }
+                        case "[CONSOLE]": {
+                            String finalAc = ac;
+                            Scheduler.get().execute(() -> Bukkit.dispatchCommand(Bukkit.getConsoleSender(), finalAc));
+                            break;
+                        }
+                        case "[CLOSE]": {
+                            player.closeInventory();
+                            break;
+                        }
+                    }
+                }
+            };
+        }
+
         final GuiItem guiItem = new GuiItem(buildItem(route, replacements), action);
         gui.setItem(slots, guiItem);
     }
